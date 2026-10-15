@@ -63,7 +63,7 @@ TOOLS = [
     {
         "name": "recall_memory",
         "description": "Search saved memories on demand.",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": {"query"}}
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
     },
     {
         "name": "undo_last_action",
@@ -118,10 +118,13 @@ def ask_gemini(history):
     }
     for model in MODEL_LADDER:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
-        r = requests.post(url, json=payload, timeout=35)
-        if r.status_code == 200:
-            return r.json()
-    raise Exception("All models busy.")
+        try:
+            r = requests.post(url, json=payload, timeout=35)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            continue
+    return None
 
 def run_conversation_turn(session_id, user_text):
     history = CHAT_HISTORY.setdefault(session_id, [])
@@ -130,21 +133,33 @@ def run_conversation_turn(session_id, user_text):
         history[:] = history[-20:]
 
     resp = ask_gemini(history)
+    if not resp or "candidates" not in resp:
+        return "Arre, I had a small hiccup connecting to my brain. Try saying that again!"
+
     part = resp["candidates"][0]["content"]["parts"][0]
 
-    while "functionCall" in part:
+    # Handle tool calls safely
+    loop_count = 0
+    while "functionCall" in part and loop_count < 3:
+        loop_count += 1
         fn_name = part["functionCall"]["name"]
         fn_args = part["functionCall"].get("args", {})
-        result = HANDLERS[fn_name](fn_args)
+        try:
+            result = HANDLERS[fn_name](fn_args)
+        except Exception as e:
+            result = {"error": str(e)}
+
         history.append({"role": "model", "parts": [part]})
         history.append({
             "role": "user",
             "parts": [{"functionResponse": {"name": fn_name, "response": result}}]
         })
         resp = ask_gemini(history)
+        if not resp or "candidates" not in resp:
+            break
         part = resp["candidates"][0]["content"]["parts"][0]
 
-    reply = part.get("text", "Done.")
+    reply = part.get("text", "Acha, got it! What's next?")
     history.append({"role": "model", "parts": [{"text": reply}]})
     return reply
 
@@ -174,7 +189,7 @@ APP_HTML = """
   .mem-item button { background: #ef4444; color: white; border: none; padding: 2px 8px; border-radius: 4px; }
   footer { background: #1e293b; padding: 10px 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid #334155; }
   input { flex: 1; padding: 12px 14px; border-radius: 24px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 1rem; outline: none; }
-  .btn-circle { width: 46px; height: 46px; border-radius: 50%; border: none; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .btn-circle { width: 46px; height: 46px; border-radius: 50%; border: none; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
   #mic-btn { background: #0284c7; color: white; }
   #mic-btn.listening { background: #ef4444; animation: pulse 1.2s infinite; }
   #send-btn { background: #10b981; color: white; }
@@ -194,9 +209,9 @@ APP_HTML = """
     <div class="msg bot">Hey! I'm Shrushti. What's up? Feel free to type or talk in any language.</div>
   </div>
   <footer>
-    <button class="btn-circle" id="mic-btn" onclick="toggleMic()">🎤</button>
-    <input id="inp" type="text" placeholder="Type a message..." onkeypress="if(event.key==='Enter')sendMsg()">
-    <button class="btn-circle" id="send-btn" onclick="sendMsg()">➤</button>
+    <button class="btn-circle" id="mic-btn" onclick="toggleMic()" title="Talk to Didi">🎤</button>
+    <input id="inp" type="text" placeholder="Type or talk to Didi..." onkeypress="if(event.key==='Enter')sendMsg()">
+    <button class="btn-circle" id="send-btn" onclick="sendMsg()" title="Send">➤</button>
   </footer>
 
 <script>
@@ -222,18 +237,35 @@ async function sendMsg() {
   if (!text) return;
   appendMsg(text, 'user');
   inp.value = '';
-  const r = await fetch('/api/chat', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({message: text})
-  });
-  const data = await r.json();
-  appendMsg(data.reply, 'bot');
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(data.reply);
-    u.lang = 'hi-IN';
-    window.speechSynthesis.speak(u);
+  
+  // Typing indicator placeholder
+  const loadingId = 'load_' + Date.now();
+  const loadDiv = document.createElement('div');
+  loadDiv.id = loadingId;
+  loadDiv.className = 'msg bot';
+  loadDiv.innerText = 'Shrushti is typing...';
+  chat.appendChild(loadDiv);
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: text})
+    });
+    const data = await r.json();
+    document.getElementById(loadingId).remove();
+    appendMsg(data.reply, 'bot');
+    
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(data.reply);
+      u.lang = 'hi-IN';
+      window.speechSynthesis.speak(u);
+    }
+  } catch (err) {
+    document.getElementById(loadingId).remove();
+    appendMsg("Arre network issue aa gaya! Try again.", 'bot');
   }
 }
 
@@ -242,18 +274,27 @@ let rec = null;
 if (SpeechRecognition) {
   rec = new SpeechRecognition();
   rec.continuous = false;
+  rec.interimResults = false;
   rec.onresult = (e) => {
     inp.value = e.results[0][0].transcript;
     micBtn.classList.remove('listening');
     sendMsg();
   };
+  rec.onerror = () => micBtn.classList.remove('listening');
   rec.onend = () => micBtn.classList.remove('listening');
 }
 
 function toggleMic() {
-  if (!rec) { alert("Use Chrome for voice input."); return; }
-  micBtn.classList.add('listening');
-  rec.start();
+  if (!rec) { 
+    alert("Voice input works inside Google Chrome on your phone. Make sure mic permission is allowed!"); 
+    return; 
+  }
+  try {
+    micBtn.classList.add('listening');
+    rec.start();
+  } catch(e) {
+    micBtn.classList.remove('listening');
+  }
 }
 
 async function toggleMemories() {
@@ -316,5 +357,6 @@ def api_del_memory(idx):
     return jsonify({"status": "deleted"})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.g("PORT", 10000)) if False else int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+    
