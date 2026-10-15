@@ -1,11 +1,15 @@
-import os, glob, json, importlib.util, requests, io
+import os, glob, json, importlib.util, io
 from flask import Flask, request, jsonify, render_template_string, Response
+from google import genai
 from pypdf import PdfReader
 
-# Apni yehi AQ wali key yahan daal do
-GEMINI_KEY = "AQ.Ab8RN6LYa-OrX4LGYODhjMnxQC28Q9Cs-eOKuxnSHnJwNQfzfQ"
+# Apni key yahan daal do (chahe AIza wali ho ya AQ wali, SDK khud handle kar lega)
+GEMINI_KEY = "AQ.Ab8RN6K5izNAAcoZXagQfO-7UIIaFts2uhP8Io-oZm9YjJQm_Q"
 
 app = Flask(__name__)
+
+# Official GenAI Client setup
+client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY and "Yahan" not in GEMINI_KEY else None
 
 ASSISTANT_CONFIG = {
     "names": ["Shrushti", "Didi", "Didu"],
@@ -14,11 +18,8 @@ ASSISTANT_CONFIG = {
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
-MODEL_LADDER = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-]
+# Model ladder
+MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
 MEMORIES = []
 ACTION_LOG = []
@@ -100,84 +101,51 @@ for path in glob.glob("plugins/*.py"):
         TOOLS.append(mod.TOOL)
         HANDLERS[mod.TOOL["name"]] = mod.handler
 
-def ask_gemini(history):
-    if not GEMINI_KEY:
-        return {"error": "Arey! API key missing hai."}
+def ask_gemini(user_message):
+    if not client:
+        return "Arey Chhote! Code mein valid GEMINI_API_KEY daalna bhool gaye ho."
 
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
-    names_str = " / ".join(ASSISTANT_CONFIG["names"])
-    
     sys_prompt = (
-        f"Your name is {names_str}. You are a very close, loving, and casual big sister (Didi) to the user. "
-        f"Talk in a super natural, conversational, and everyday tone—just like chatting on WhatsApp. "
-        f"Use casual expressions like 'Arey', 'Suno', 'Acha', 'Haan', emojis, and keep your sentences warm and lively."
+        f"Your name is Shrushti (Didi). You are a very close, loving, and casual big sister to the user. "
+        f"Talk in a super natural, conversational everyday tone (WhatsApp style). Use casual words like 'Arey', 'Suno', emojis. "
+        f"Known facts:\n{mem_text}"
     )
-    
-    payload = {
-        "contents": history,
-        "system_instruction": {"parts": [{"text": sys_prompt}]},
-        "tools": [{"function_declarations": TOOLS}]
-    }
 
-    last_error = ""
-    for model in MODEL_LADDER:
-        # AQ wali key ke liye Authorization Bearer header use hota hai
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {GEMINI_KEY}"
-        }
-
+    last_err = ""
+    for model_name in MODELS:
         try:
-            r = requests.post(url, json=payload, headers=headers, timeout=30)
-            if r.status_code == 200:
-                return r.json()
-            else:
-                last_error = f"Model {model} error ({r.status_code}): {r.text}"
+            # Official SDK call configuration
+            response = client.models.generate_content(
+                model=model_name,
+                contents=user_message,
+                config={
+                    "system_instruction": sys_prompt,
+                    "temperature": 0.7,
+                }
+            )
+            if response and response.text:
+                return response.text
         except Exception as e:
-            last_error = f"Exception with {model}: {str(e)}"
+            last_err = str(e)
             continue
-    return {"error": last_error}
+            
+    return f"Arey, sabhi models busy the ya error aaya: {last_err}"
 
-def run_conversation_turn(session_id, user_text):
-    history = CHAT_HISTORY.setdefault(session_id, [])
-    history.append({"role": "user", "parts": [{"text": user_text}]})
-    if len(history) > 20:
-        history[:] = history[-20:]
+@app.route("/")
+def index():
+    return render_template_string(APP_HTML)
 
-    resp = ask_gemini(history)
-    if not resp:
-        return "Arey Chhote, kuch response nahi aaya."
-    if "error" in resp:
-        return f"API Error: {resp['error']}"
-    if "candidates" not in resp:
-        return f"Unexpected response: {str(resp)}"
+@app.route("/manifest.json")
+def manifest():
+    return Response(json.dumps({"name": "Shrushti AI", "start_url": "/", "display": "standalone"}), mimetype="application/json")
 
-    part = resp["candidates"][0]["content"]["parts"][0]
-
-    loop_count = 0
-    while "functionCall" in part and loop_count < 3:
-        loop_count += 1
-        fn_name = part["functionCall"]["name"]
-        fn_args = part["functionCall"].get("args", {})
-        try:
-            result = HANDLERS[fn_name](fn_args)
-        except Exception as e:
-            result = {"error": str(e)}
-
-        history.append({"role": "model", "parts": [part]})
-        history.append({
-            "role": "user",
-            "parts": [{"functionResponse": {"name": fn_name, "response": result}}]
-        })
-        resp = ask_gemini(history)
-        if not resp or "candidates" not in resp:
-            break
-        part = resp["candidates"][0]["content"]["parts"][0]
-
-    reply = part.get("text", "Acha, theek hai!")
-    history.append({"role": "model", "parts": [{"text": reply}]})
-    return reply
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    data = request.get_json(force=True)
+    user_text = data.get("message", "")
+    reply = ask_gemini(user_text)
+    return jsonify({"reply": reply})
 
 APP_HTML = """
 <!DOCTYPE html>
@@ -187,13 +155,12 @@ APP_HTML = """
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#090d16">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="/manifest.json">
 <title>Shrushti AI - Your Big Sister</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body { background: #090d16; color: #f1f5f9; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
-  header { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.15); flex-shrink: 0; z-index: 10; }
+  header { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.15); flex-shrink: 0; }
   .brand { display: flex; align-items: center; gap: 10px; }
   .avatar-glow { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #38bdf8, #818cf8); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; box-shadow: 0 0 12px rgba(56, 189, 248, 0.4); }
   header h1 { font-size: 1.05rem; font-weight: 600; color: #f8fafc; }
@@ -253,20 +220,6 @@ function toggleMic() {
 </body>
 </html>
 """
-
-@app.route("/")
-def index():
-    return render_template_string(APP_HTML)
-
-@app.route("/manifest.json")
-def manifest():
-    return Response(json.dumps({"name": "Shrushti AI", "start_url": "/", "display": "standalone"}), mimetype="application/json")
-
-@app.route("/api/chat", methods=["POST"])
-def api_chat():
-    data = request.get_json(force=True)
-    reply = run_conversation_turn("web_user", data.get("message", ""))
-    return jsonify({"reply": reply})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
