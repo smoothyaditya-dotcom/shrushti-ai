@@ -9,7 +9,7 @@ app = Flask(__name__)
 ASSISTANT_CONFIG = {
     "names": ["Shrushti", "Didi", "Didu"],
     "user_name": "Chhote",
-    "tone": "casual, friendly, relaxed, and helpful AI assistant",
+    "tone": "casual, friendly, relaxed, and loving big-sister AI assistant",
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
@@ -101,20 +101,19 @@ for path in glob.glob("plugins/*.py"):
 
 def ask_gemini(history):
     if not GEMINI_KEY:
-        return {"error": "API Key missing! Please set GEMINI_API_KEY in Render environment variables."}
+        return {"error": "API Key missing! Please set GEMINI_API_KEY in Render."}
 
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
     names_str = " / ".join(ASSISTANT_CONFIG["names"])
     sys_prompt = (
-        f"Your name is {names_str}. Respond naturally in a casual, conversational tone. "
-        f"Style: {ASSISTANT_CONFIG['tone']}. Address the user as {ASSISTANT_CONFIG['user_name']}. "
+        f"Your name is {names_str}. You are a loving, caring, and casual big sister (Didi) to the user. "
+        f"Style: {ASSISTANT_CONFIG['tone']}. Address the user warmly as {ASSISTANT_CONFIG['user_name']}. "
         f"Always maintain clarity that you are an AI assistant.\n"
         f"MULTILINGUAL RULE: Reply in the exact language and script the user uses. "
         f"Current language setting: {ASSISTANT_CONFIG['preferred_language']}.\n"
         f"Known facts:\n{mem_text}"
     )
     
-    # Clean standard v1beta payload structure
     payload = {
         "contents": history,
         "system_instruction": {"parts": [{"text": sys_prompt}]},
@@ -125,13 +124,9 @@ def ask_gemini(history):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
         try:
             r = requests.post(url, json=payload, timeout=30)
-            print(f"Model {model} status: {r.status_code}")
             if r.status_code == 200:
                 return r.json()
-            else:
-                print(f"Error response: {r.text}")
-        except Exception as e:
-            print(f"Exception with model {model}: {str(e)}")
+        except Exception:
             continue
     return None
 
@@ -143,11 +138,11 @@ def run_conversation_turn(session_id, user_text):
 
     resp = ask_gemini(history)
     if not resp:
-        return "Arre! Check if your GEMINI_API_KEY is correctly added in Render settings."
+        return "Arre! Check your GEMINI_API_KEY in Render settings."
     if "error" in resp:
         return resp["error"]
     if "candidates" not in resp:
-        return "Acha, API limit hit ho gayi ya busy hai. Ek baar aur try karo!"
+        return "Acha, server is a bit busy. Try again!"
 
     part = resp["candidates"][0]["content"]["parts"][0]
 
@@ -171,7 +166,7 @@ def run_conversation_turn(session_id, user_text):
             break
         part = resp["candidates"][0]["content"]["parts"][0]
 
-    reply = part.get("text", "Acha, got it! What's next?")
+    reply = part.get("text", "Acha, got it!")
     history.append({"role": "model", "parts": [{"text": reply}]})
     return reply
 
@@ -181,48 +176,95 @@ APP_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#090d16">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="/manifest.json">
-<title>Shrushti AI</title>
+<title>Shrushti AI - Your Big Sister</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-  body { background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
-  header { background: #1e293b; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; flex-shrink: 0; }
-  header h1 { font-size: 1.1rem; color: #38bdf8; }
-  .header-btns button { background: #334155; color: #fff; border: none; padding: 6px 10px; border-radius: 8px; margin-left: 4px; font-size: 0.8rem; }
-  #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 85%; padding: 12px 15px; border-radius: 16px; line-height: 1.45; font-size: 0.95rem; word-wrap: break-word; }
-  .user { background: #0284c7; align-self: flex-end; border-bottom-right-radius: 4px; }
-  .bot { background: #1e293b; border: 1px solid #334155; align-self: flex-start; border-bottom-left-radius: 4px; }
-  #mem-panel { display: none; background: #1e293b; padding: 14px; border-bottom: 1px solid #334155; max-height: 40vh; overflow-y: auto; flex-shrink: 0; }
-  .mem-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #334155; font-size: 0.9rem; }
-  .mem-item button { background: #ef4444; color: white; border: none; padding: 2px 8px; border-radius: 4px; }
-  footer { background: #1e293b; padding: 10px 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid #334155; flex-shrink: 0; }
-  input { flex: 1; padding: 12px 14px; border-radius: 24px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 1rem; outline: none; }
-  .btn-circle { width: 44px; height: 44px; border-radius: 50%; border: none; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
-  #mic-btn { background: #0284c7; color: white; }
-  #mic-btn.listening { background: #ef4444; animation: pulse 1.2s infinite; }
-  #send-btn { background: #10b981; color: white; }
-  @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { background: #090d16; color: #f1f5f9; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  
+  /* Header styling */
+  header { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.15); flex-shrink: 0; z-index: 10; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .avatar-glow { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #38bdf8, #818cf8); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; box-shadow: 0 0 12px rgba(56, 189, 248, 0.4); }
+  header h1 { font-size: 1.05rem; font-weight: 600; color: #f8fafc; letter-spacing: 0.3px; }
+  header span { display: block; font-size: 0.75rem; color: #38bdf8; font-weight: 400; }
+  
+  .header-btns { display: flex; gap: 6px; }
+  .header-btns button { background: rgba(30, 41, 59, 0.8); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.08); padding: 6px 10px; border-radius: 10px; font-size: 0.78rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+  .header-btns button:active { transform: scale(0.95); background: #38bdf8; color: #0f172a; }
+
+  /* Quick action chips */
+  .chips-bar { display: flex; gap: 8px; padding: 10px 16px; background: rgba(9, 13, 22, 0.9); overflow-x: auto; flex-shrink: 0; scrollbar-width: none; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .chips-bar::-webkit-scrollbar { display: none; }
+  .chip { background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 5px 12px; border-radius: 20px; font-size: 0.78rem; white-space: nowrap; cursor: pointer; transition: background 0.2s; }
+  .chip:active { background: #38bdf8; color: #090d16; }
+
+  /* Chat Box Area */
+  #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+  .msg { max-width: 82%; padding: 12px 16px; border-radius: 18px; line-height: 1.5; font-size: 0.94rem; word-wrap: break-word; animation: fadeIn 0.25s ease-out; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  
+  .user { background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bot { background: rgba(30, 41, 59, 0.75); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.06); color: #f1f5f9; align-self: flex-start; border-bottom-left-radius: 4px; }
+  
+  /* Typing indicator animation */
+  .typing span { height: 7px; width: 7px; float: left; margin: 0 2px; background-color: #94a3b8; border-radius: 50%; display: inline-block; animation: bounce 1.3s infinite ease-in-out; }
+  .typing span:nth-child(2) { animation-delay: -1.1s; }
+  .typing span:nth-child(3) { animation-delay: -0.9s; }
+  @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+  /* Memory Panel */
+  #mem-panel { display: none; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(16px); padding: 16px; border-bottom: 1px solid rgba(56, 189, 248, 0.2); max-height: 45vh; overflow-y: auto; flex-shrink: 0; z-index: 5; }
+  #mem-panel h3 { font-size: 0.95rem; color: #38bdf8; margin-bottom: 8px; }
+  .mem-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.88rem; color: #cbd5e1; }
+  .mem-item button { background: rgba(239, 68, 68,.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 3px 10px; border-radius: 6px; font-size: 0.78rem; cursor: pointer; }
+
+  /* Footer Input Area */
+  footer { background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(12px); padding: 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid rgba(255, 255, 255, 0.06); flex-shrink: 0; }
+  input { flex: 1; padding: 13px 16px; border-radius: 26px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(30, 41, 59, 0.5); color: #fff; font-size: 0.96rem; outline: none; transition: border 0.2s; }
+  input:focus { border-color: #38bdf8; box-shadow: 0 0 10px rgba(56, 189, 248, 0.25); }
+  
+  .btn-circle { width: 46px; height: 46px; border-radius: 50%; border: none; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: transform 0.1s; }
+  .btn-circle:active { transform: scale(0.92); }
+  #mic-btn { background: linear-gradient(135deg, #0284c7, #38bdf8); color: white; box-shadow: 0 0 10px rgba(2, 132, 199, 0.4); }
+  #mic-btn.listening { background: linear-gradient(135deg, #dc2626, #ef4444); animation: pulse 1.2s infinite; box-shadow: 0 0 15px rgba(239, 68, 68, 0.6); }
+  #send-btn { background: linear-gradient(135deg, #059669, #10b981); color: white; box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
+
+  @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
 </style>
 </head>
 <body>
   <header>
-    <h1>✨ Shrushti AI</h1>
+    <div class="brand">
+      <div class="avatar-glow">✨</div>
+      <div>
+        <h1>Shrushti</h1>
+        <span>Online • Didi</span>
+      </div>
+    </div>
     <div class="header-btns">
-      <button onclick="sendQuick('Give me a quick casual update with weather and news.')">☀️ Update</button>
       <button onclick="toggleMemories()">🧠 Memories</button>
     </div>
   </header>
-  <div id="mem-panel"></div>
-  <div id="chat">
-    <div class="msg bot">Hey! I'm Shrushti. What's up? Type or tap the mic to talk in any language!</div>
+
+  <div class="chips-bar">
+    <div class="chip" onclick="sendQuick('☀️ Morning Briefing dedo!')">☀️ Briefing</div>
+    <div class="chip" onclick="sendQuick('Aaj ka mausam kaisa hai?')">🌤️ Weather</div>
+    <div class="chip" onclick="sendQuick('Kuch motivational bolo didu!')">💬 Motivation</div>
   </div>
+
+  <div id="mem-panel"></div>
+  
+  <div id="chat">
+    <div class="msg bot">Arey Chhote! Main aa gayi. Batao kya chal raha hai? Type karo ya mic dabao, kisi bhi bhasha mein baat kar sakte hain! 💕</div>
+  </div>
+
   <footer>
     <button class="btn-circle" id="mic-btn" onclick="toggleMic()" title="Talk">🎤</button>
-    <input id="inp" type="text" placeholder="Type or talk..." onkeypress="if(event.key==='Enter')sendMsg()">
+    <input id="inp" type="text" placeholder="Type or talk to Didi..." onkeypress="if(event.key==='Enter')sendMsg()">
     <button class="btn-circle" id="send-btn" onclick="sendMsg()" title="Send">➤</button>
   </footer>
 
@@ -253,8 +295,8 @@ async function sendMsg() {
   const loadingId = 'load_' + Date.now();
   const loadDiv = document.createElement('div');
   loadDiv.id = loadingId;
-  loadDiv.className = 'msg bot';
-  loadDiv.innerText = 'Shrushti is typing...';
+  loadDiv.className = 'msg bot typing';
+  loadDiv.innerHTML = '<span></span><span></span><span></span>';
   chat.appendChild(loadDiv);
   chat.scrollTop = chat.scrollHeight;
 
@@ -276,7 +318,7 @@ async function sendMsg() {
     }
   } catch (err) {
     document.getElementById(loadingId).remove();
-    appendMsg("Arre network issue aa gaya! Try again.", 'bot');
+    appendMsg("Arre network issue aa gaya! Ek baar aur try karo.", 'bot');
   }
 }
 
@@ -313,9 +355,9 @@ async function toggleMemories() {
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
   const r = await fetch('/api/memories');
   const data = await r.json();
-  panel.innerHTML = '<strong>Saved Memories:</strong><br>' + (data.memories.length ? data.memories.map((m, i) =>
+  panel.innerHTML = '<h3>🧠 Saved Memories:</h3>' + (data.memories.length ? data.memories.map((m, i) =>
     `<div class="mem-item"><span>${m}</span><button onclick="delMem(${i})">Delete</button></div>`
-  ).join('') : 'No memories saved yet.');
+  ).join('') : '<p style="color:#94a3b8; font-size:0.85rem;">No memories saved yet.</p>');
   panel.style.display = 'block';
 }
 
@@ -340,8 +382,8 @@ def manifest():
         "short_name": "Shrushti",
         "start_url": "/",
         "display": "standalone",
-        "background_color": "#0f172a",
-        "theme_color": "#0f172a",
+        "background_color": "#090d16",
+        "theme_color": "#090d16",
         "icons": [{
             "src": "https://cdn-icons-png.flaticon.com/512/4712/4712027.png",
             "sizes": "512x512",
