@@ -22,7 +22,8 @@ ASSISTANT_CONFIG = {
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
-MODEL_NAME = "llama-3.1-8b-instant"
+# Groq ka active aur valid model ID
+MODEL_NAME = "llama-3.3-70b-versatile"
 
 MEMORIES = []
 ACTION_LOG = []
