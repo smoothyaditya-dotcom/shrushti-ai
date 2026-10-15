@@ -2,7 +2,7 @@ import os, glob, json, importlib.util, requests, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
-# Yahan apni wahi AQ wali key daal do jo abhi mili hai
+# Apni yehi AQ wali key yahan daal do
 GEMINI_KEY = "AQ.Ab8RN6LYa-OrX4LGYODhjMnxQC28Q9Cs-eOKuxnSHnJwNQfzfQ"
 
 app = Flask(__name__)
@@ -15,9 +15,9 @@ ASSISTANT_CONFIG = {
 }
 
 MODEL_LADDER = [
+    "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro"
+    "gemini-1.5-flash"
 ]
 
 MEMORIES = []
@@ -121,13 +121,12 @@ def ask_gemini(history):
 
     last_error = ""
     for model in MODEL_LADDER:
-        headers = {"Content-Type": "application/json"}
-        # Agar key AIza se shuru ho toh query param, AQ se ho toh Bearer token
-        if GEMINI_KEY.startswith("AIza"):
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
-        else:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            headers["Authorization"] = f"Bearer {GEMINI_KEY}"
+        # AQ wali key ke liye Authorization Bearer header use hota hai
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GEMINI_KEY}"
+        }
 
         try:
             r = requests.post(url, json=payload, headers=headers, timeout=30)
