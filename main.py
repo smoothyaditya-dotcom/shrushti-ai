@@ -9,7 +9,7 @@ app = Flask(__name__)
 ASSISTANT_CONFIG = {
     "names": ["Shrushti", "Didi", "Didu"],
     "user_name": "Chhote",
-    "tone": "helpful, encouraging, patient AI assistant using a respectful older-sister (Didi) greeting style",
+    "tone": "casual, friendly, relaxed, and helpful AI assistant",
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
@@ -63,7 +63,7 @@ TOOLS = [
     {
         "name": "recall_memory",
         "description": "Search saved memories on demand.",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": {"query"}}
     },
     {
         "name": "undo_last_action",
@@ -103,9 +103,9 @@ def ask_gemini(history):
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
     names_str = " / ".join(ASSISTANT_CONFIG["names"])
     sys_prompt = (
-        f"Your name is {names_str}. Respond naturally when called Shrushti, Didi, or Didu. "
-        f"Style: {ASSISTANT_CONFIG['tone']}. Address the user as {ASSISTANT_CONFIG['user_name']} "
-        f"('भाऊ' / 'Bro' / 'Chhote'). Always remain honest that you are an AI assistant program.\n"
+        f"Your name is {names_str}. Respond naturally in a casual, conversational tone. "
+        f"Style: {ASSISTANT_CONFIG['tone']}. Address the user as {ASSISTANT_CONFIG['user_name']}. "
+        f"Always maintain clarity that you are an AI assistant.\n"
         f"MULTILINGUAL RULE: Reply in the exact language and script the user uses. "
         f"Current language setting: {ASSISTANT_CONFIG['preferred_language']}.\n"
         f"Active skills: {list(HANDLERS.keys())}.\n"
@@ -183,19 +183,19 @@ APP_HTML = """
 </head>
 <body>
   <header>
-    <h1>✨ Shrushti (Didi)</h1>
+    <h1>✨ Shrushti AI</h1>
     <div class="header-btns">
-      <button onclick="sendQuick('Give me my Morning Briefing with weather and top news.')">☀️ Briefing</button>
+      <button onclick="sendQuick('Give me a quick casual update with weather and news.')">☀️ Update</button>
       <button onclick="toggleMemories()">🧠 Memories</button>
     </div>
   </header>
   <div id="mem-panel"></div>
   <div id="chat">
-    <div class="msg bot">Namaste! I'm Shrushti (Didi). Tap the mic or type below in any language!</div>
+    <div class="msg bot">Hey! I'm Shrushti. What's up? Feel free to type or talk in any language.</div>
   </div>
   <footer>
     <button class="btn-circle" id="mic-btn" onclick="toggleMic()">🎤</button>
-    <input id="inp" type="text" placeholder="Talk to Didi..." onkeypress="if(event.key==='Enter')sendMsg()">
+    <input id="inp" type="text" placeholder="Type a message..." onkeypress="if(event.key==='Enter')sendMsg()">
     <button class="btn-circle" id="send-btn" onclick="sendMsg()">➤</button>
   </footer>
 
@@ -284,7 +284,7 @@ def index():
 @app.route("/manifest.json")
 def manifest():
     return Response(json.dumps({
-        "name": "Shrushti AI (Didi)",
+        "name": "Shrushti AI",
         "short_name": "Shrushti",
         "start_url": "/",
         "display": "standalone",
@@ -318,4 +318,3 @@ def api_del_memory(idx):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-  
