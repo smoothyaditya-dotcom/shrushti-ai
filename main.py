@@ -2,8 +2,8 @@ import os, glob, json, importlib.util, requests, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
-# Yahan apni key seedha daal do
-GEMINI_KEY = "AQ.Ab8RN6IP_FUcKtF1gqBiMd8e7jBzClxBIiXajkWErCUpmdYabQ"
+# Yahan apni wahi AQ wali key daal do jo abhi mili hai
+GEMINI_KEY = "AQ.Ab8RN6LYa-OrX4LGYODhjMnxQC28Q9Cs-eOKuxnSHnJwNQfzfQ"
 
 app = Flask(__name__)
 
@@ -14,7 +14,6 @@ ASSISTANT_CONFIG = {
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
-# Stable model names use karte hain
 MODEL_LADDER = [
     "gemini-2.0-flash",
     "gemini-1.5-flash",
@@ -102,8 +101,8 @@ for path in glob.glob("plugins/*.py"):
         HANDLERS[mod.TOOL["name"]] = mod.handler
 
 def ask_gemini(history):
-    if not GEMINI_KEY or "Yahan_apni" in GEMINI_KEY:
-        return {"error": "Arey! Tumne code mein apni asli API key paste nahi ki hai!"}
+    if not GEMINI_KEY:
+        return {"error": "Arey! API key missing hai."}
 
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
     names_str = " / ".join(ASSISTANT_CONFIG["names"])
@@ -122,9 +121,16 @@ def ask_gemini(history):
 
     last_error = ""
     for model in MODEL_LADDER:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
+        headers = {"Content-Type": "application/json"}
+        # Agar key AIza se shuru ho toh query param, AQ se ho toh Bearer token
+        if GEMINI_KEY.startswith("AIza"):
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
+        else:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            headers["Authorization"] = f"Bearer {GEMINI_KEY}"
+
         try:
-            r = requests.post(url, json=payload, timeout=30)
+            r = requests.post(url, json=payload, headers=headers, timeout=30)
             if r.status_code == 200:
                 return r.json()
             else:
@@ -234,6 +240,7 @@ async function sendMsg() {
     const r = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: text})});
     const data = await r.json();
     const bd = document.createElement('div'); bd.className = 'msg bot'; bd.innerText = data.reply; chat.appendChild(bd);
+    chat.scrollTop = chat.scrollHeight;
   } catch(e) {
     const bd = document.createElement('div'); bd.className = 'msg bot'; bd.innerText = "Network error!"; chat.appendChild(bd);
   }
