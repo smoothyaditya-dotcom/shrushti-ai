@@ -2,7 +2,7 @@ import os, glob, json, importlib.util, requests, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_KEY = "AQ.Ab8RN6JLHPCpiPEU-NVsWjj0-IBhZlna6YLyGutb96R-CJGoMg"
 
 app = Flask(__name__)
 
