@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
 # Yahan apni key seedha daal do
-GEMINI_KEY = "AQ.Ab8RN6JLHPCpiPEU-NVsWjj0-IBhZlna6YLyGutb96R-CJGoMg"
+GEMINI_KEY = "AQ.Ab8RN6IP_FUcKtF1gqBiMd8e7jBzClxBIiXajkWErCUpmdYabQ"
 
 app = Flask(__name__)
 
