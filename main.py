@@ -22,7 +22,7 @@ ASSISTANT_CONFIG = {
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
-MODEL_NAME = "llama-3.3-70b-versatile"
+MODEL_NAME = "llama-3.1-8b-instant"
 
 MEMORIES = []
 ACTION_LOG = []
