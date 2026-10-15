@@ -1,0 +1,321 @@
+import os, glob, json, importlib.util, requests, io
+from flask import Flask, request, jsonify, render_template_string, Response
+from pypdf import PdfReader
+
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+
+app = Flask(__name__)
+
+ASSISTANT_CONFIG = {
+    "names": ["Shrushti", "Didi", "Didu"],
+    "user_name": "Chhote",
+    "tone": "helpful, encouraging, patient AI assistant using a respectful older-sister (Didi) greeting style",
+    "preferred_language": "Auto-detect (match the user's exact language and script)"
+}
+
+MODEL_LADDER = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash"
+]
+
+MEMORIES = []
+ACTION_LOG = []
+CHAT_HISTORY = {}
+
+def save_memory(args):
+    fact = args.get("fact", "")
+    MEMORIES.append(fact)
+    ACTION_LOG.append({"action": "save_memory", "fact": fact})
+    return {"status": "Saved to memory", "fact": fact}
+
+def recall_memory(args):
+    query = args.get("query", "").lower()
+    matches = [m for m in MEMORIES if query in m.lower()]
+    return {"matches": matches if matches else MEMORIES}
+
+def undo_last_action(args):
+    if not ACTION_LOG:
+        return {"status": "Nothing to undo."}
+    last = ACTION_LOG.pop()
+    if last["action"] == "save_memory" and last["fact"] in MEMORIES:
+        MEMORIES.remove(last["fact"])
+        return {"status": f"Undid memory: {last['fact']}"}
+    return {"status": "Undone"}
+
+def customize_assistant(args):
+    prev = dict(ASSISTANT_CONFIG)
+    if "user_name" in args:
+        ASSISTANT_CONFIG["user_name"] = args["user_name"]
+    if "tone" in args:
+        ASSISTANT_CONFIG["tone"] = args["tone"]
+    if "preferred_language" in args:
+        ASSISTANT_CONFIG["preferred_language"] = args["preferred_language"]
+    ACTION_LOG.append({"action": "customize", "previous": prev})
+    return {"status": "Updated immediately", "current_config": ASSISTANT_CONFIG}
+
+TOOLS = [
+    {
+        "name": "save_memory",
+        "description": "Save an important fact, preference, or goal about the user.",
+        "parameters": {"type": "object", "properties": {"fact": {"type": "string"}}, "required": ["fact"]}
+    },
+    {
+        "name": "recall_memory",
+        "description": "Search saved memories on demand.",
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
+    },
+    {
+        "name": "undo_last_action",
+        "description": "Undo the last memory saved or setting changed.",
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "customize_assistant",
+        "description": "Update user name, tone, or preferred language.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_name": {"type": "string"},
+                "tone": {"type": "string"},
+                "preferred_language": {"type": "string"}
+            }
+        }
+    }
+]
+
+HANDLERS = {
+    "save_memory": save_memory,
+    "recall_memory": recall_memory,
+    "undo_last_action": undo_last_action,
+    "customize_assistant": customize_assistant
+}
+
+for path in glob.glob("plugins/*.py"):
+    spec = importlib.util.spec_from_file_location("plugin", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if hasattr(mod, "TOOL") and hasattr(mod, "handler"):
+        TOOLS.append(mod.TOOL)
+        HANDLERS[mod.TOOL["name"]] = mod.handler
+
+def ask_gemini(history):
+    mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
+    names_str = " / ".join(ASSISTANT_CONFIG["names"])
+    sys_prompt = (
+        f"Your name is {names_str}. Respond naturally when called Shrushti, Didi, or Didu. "
+        f"Style: {ASSISTANT_CONFIG['tone']}. Address the user as {ASSISTANT_CONFIG['user_name']} "
+        f"('भाऊ' / 'Bro' / 'Chhote'). Always remain honest that you are an AI assistant program.\n"
+        f"MULTILINGUAL RULE: Reply in the exact language and script the user uses. "
+        f"Current language setting: {ASSISTANT_CONFIG['preferred_language']}.\n"
+        f"Active skills: {list(HANDLERS.keys())}.\n"
+        f"Known facts:\n{mem_text}"
+    )
+    payload = {
+        "system_instruction": {"parts": [{"text": sys_prompt}]},
+        "contents": history,
+        "tools": [{"function_declarations": TOOLS}]
+    }
+    for model in MODEL_LADDER:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
+        r = requests.post(url, json=payload, timeout=35)
+        if r.status_code == 200:
+            return r.json()
+    raise Exception("All models busy.")
+
+def run_conversation_turn(session_id, user_text):
+    history = CHAT_HISTORY.setdefault(session_id, [])
+    history.append({"role": "user", "parts": [{"text": user_text}]})
+    if len(history) > 20:
+        history[:] = history[-20:]
+
+    resp = ask_gemini(history)
+    part = resp["candidates"][0]["content"]["parts"][0]
+
+    while "functionCall" in part:
+        fn_name = part["functionCall"]["name"]
+        fn_args = part["functionCall"].get("args", {})
+        result = HANDLERS[fn_name](fn_args)
+        history.append({"role": "model", "parts": [part]})
+        history.append({
+            "role": "user",
+            "parts": [{"functionResponse": {"name": fn_name, "response": result}}]
+        })
+        resp = ask_gemini(history)
+        part = resp["candidates"][0]["content"]["parts"][0]
+
+    reply = part.get("text", "Done.")
+    history.append({"role": "model", "parts": [{"text": reply}]})
+    return reply
+
+APP_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.json">
+<title>Shrushti AI</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+  body { background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  header { background: #1e293b; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+  header h1 { font-size: 1.15rem; color: #38bdf8; }
+  .header-btns button { background: #334155; color: #fff; border: none; padding: 7px 12px; border-radius: 8px; margin-left: 6px; font-size: 0.85rem; }
+  #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 82%; padding: 12px 15px; border-radius: 16px; line-height: 1.45; font-size: 0.96rem; word-wrap: break-word; }
+  .user { background: #0284c7; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bot { background: #1e293b; border: 1px solid #334155; align-self: flex-start; border-bottom-left-radius: 4px; }
+  #mem-panel { display: none; background: #1e293b; padding: 14px; border-bottom: 1px solid #334155; max-height: 40vh; overflow-y: auto; }
+  .mem-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #334155; font-size: 0.9rem; }
+  .mem-item button { background: #ef4444; color: white; border: none; padding: 2px 8px; border-radius: 4px; }
+  footer { background: #1e293b; padding: 10px 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid #334155; }
+  input { flex: 1; padding: 12px 14px; border-radius: 24px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 1rem; outline: none; }
+  .btn-circle { width: 46px; height: 46px; border-radius: 50%; border: none; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  #mic-btn { background: #0284c7; color: white; }
+  #mic-btn.listening { background: #ef4444; animation: pulse 1.2s infinite; }
+  #send-btn { background: #10b981; color: white; }
+  @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+</style>
+</head>
+<body>
+  <header>
+    <h1>✨ Shrushti (Didi)</h1>
+    <div class="header-btns">
+      <button onclick="sendQuick('Give me my Morning Briefing with weather and top news.')">☀️ Briefing</button>
+      <button onclick="toggleMemories()">🧠 Memories</button>
+    </div>
+  </header>
+  <div id="mem-panel"></div>
+  <div id="chat">
+    <div class="msg bot">Namaste! I'm Shrushti (Didi). Tap the mic or type below in any language!</div>
+  </div>
+  <footer>
+    <button class="btn-circle" id="mic-btn" onclick="toggleMic()">🎤</button>
+    <input id="inp" type="text" placeholder="Talk to Didi..." onkeypress="if(event.key==='Enter')sendMsg()">
+    <button class="btn-circle" id="send-btn" onclick="sendMsg()">➤</button>
+  </footer>
+
+<script>
+const chat = document.getElementById('chat');
+const inp = document.getElementById('inp');
+const micBtn = document.getElementById('mic-btn');
+
+function appendMsg(text, cls) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.innerText = text;
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendQuick(text) {
+  inp.value = text;
+  await sendMsg();
+}
+
+async function sendMsg() {
+  const text = inp.value.trim();
+  if (!text) return;
+  appendMsg(text, 'user');
+  inp.value = '';
+  const r = await fetch('/api/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message: text})
+  });
+  const data = await r.json();
+  appendMsg(data.reply, 'bot');
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(data.reply);
+    u.lang = 'hi-IN';
+    window.speechSynthesis.speak(u);
+  }
+}
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+if (SpeechRecognition) {
+  rec = new SpeechRecognition();
+  rec.continuous = false;
+  rec.onresult = (e) => {
+    inp.value = e.results[0][0].transcript;
+    micBtn.classList.remove('listening');
+    sendMsg();
+  };
+  rec.onend = () => micBtn.classList.remove('listening');
+}
+
+function toggleMic() {
+  if (!rec) { alert("Use Chrome for voice input."); return; }
+  micBtn.classList.add('listening');
+  rec.start();
+}
+
+async function toggleMemories() {
+  const panel = document.getElementById('mem-panel');
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  const r = await fetch('/api/memories');
+  const data = await r.json();
+  panel.innerHTML = '<strong>Saved Memories:</strong><br>' + (data.memories.length ? data.memories.map((m, i) =>
+    `<div class="mem-item"><span>${m}</span><button onclick="delMem(${i})">Delete</button></div>`
+  ).join('') : 'No memories saved yet.');
+  panel.style.display = 'block';
+}
+
+async function delMem(idx) {
+  await fetch('/api/memories/' + idx, {method: 'DELETE'});
+  toggleMemories();
+  toggleMemories();
+}
+</script>
+</body>
+</html>
+"""
+
+@app.route("/")
+def index():
+    return render_template_string(APP_HTML)
+
+@app.route("/manifest.json")
+def manifest():
+    return Response(json.dumps({
+        "name": "Shrushti AI (Didi)",
+        "short_name": "Shrushti",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#0f172a",
+        "icons": [{
+            "src": "https://cdn-icons-png.flaticon.com/512/4712/4712027.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }]
+    }), mimetype="application/json")
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    data = request.get_json(force=True)
+    user_text = data.get("message", "")
+    reply = run_conversation_turn("web_user", user_text)
+    return jsonify({"reply": reply})
+
+@app.route("/api/memories", methods=["GET"])
+def api_get_memories():
+    return jsonify({"memories": MEMORIES})
+
+@app.route("/api/memories/<int:idx>", methods=["DELETE"])
+def api_del_memory(idx):
+    if 0 <= idx < len(MEMORIES):
+        MEMORIES.pop(idx)
+    return jsonify({"status": "deleted"})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+  
