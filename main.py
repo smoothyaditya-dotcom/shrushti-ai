@@ -5,12 +5,13 @@ try:
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "flask", "requests", "duckduckgo-search", "pypdf"])
 
+import requests
 import glob, json, importlib.util, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
 # Apni Groq API key yahan daal do (gsk_ se shuru hoti hai)
-GROQ_KEY = "‎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"
+GROQ_KEY = "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"
 
 app = Flask(__name__)
 
@@ -293,4 +294,4 @@ def api_del_memory(idx):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-        
+    
