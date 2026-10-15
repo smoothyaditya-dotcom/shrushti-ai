@@ -134,11 +134,10 @@ def run_conversation_turn(session_id, user_text):
 
     resp = ask_gemini(history)
     if not resp or "candidates" not in resp:
-        return "Arre, I had a small hiccup connecting to my brain. Try saying that again!"
+        return "Arre, network issue aa gaya! Try saying that again."
 
     part = resp["candidates"][0]["content"]["parts"][0]
 
-    # Handle tool calls safely
     loop_count = 0
     while "functionCall" in part and loop_count < 3:
         loop_count += 1
@@ -176,20 +175,20 @@ APP_HTML = """
 <title>Shrushti AI</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-  body { background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-  header { background: #1e293b; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
-  header h1 { font-size: 1.15rem; color: #38bdf8; }
-  .header-btns button { background: #334155; color: #fff; border: none; padding: 7px 12px; border-radius: 8px; margin-left: 6px; font-size: 0.85rem; }
+  body { background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  header { background: #1e293b; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; flex-shrink: 0; }
+  header h1 { font-size: 1.1rem; color: #38bdf8; }
+  .header-btns button { background: #334155; color: #fff; border: none; padding: 6px 10px; border-radius: 8px; margin-left: 4px; font-size: 0.8rem; }
   #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 82%; padding: 12px 15px; border-radius: 16px; line-height: 1.45; font-size: 0.96rem; word-wrap: break-word; }
+  .msg { max-width: 85%; padding: 12px 15px; border-radius: 16px; line-height: 1.45; font-size: 0.95rem; word-wrap: break-word; }
   .user { background: #0284c7; align-self: flex-end; border-bottom-right-radius: 4px; }
   .bot { background: #1e293b; border: 1px solid #334155; align-self: flex-start; border-bottom-left-radius: 4px; }
-  #mem-panel { display: none; background: #1e293b; padding: 14px; border-bottom: 1px solid #334155; max-height: 40vh; overflow-y: auto; }
+  #mem-panel { display: none; background: #1e293b; padding: 14px; border-bottom: 1px solid #334155; max-height: 40vh; overflow-y: auto; flex-shrink: 0; }
   .mem-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #334155; font-size: 0.9rem; }
   .mem-item button { background: #ef4444; color: white; border: none; padding: 2px 8px; border-radius: 4px; }
-  footer { background: #1e293b; padding: 10px 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid #334155; }
+  footer { background: #1e293b; padding: 10px 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid #334155; flex-shrink: 0; }
   input { flex: 1; padding: 12px 14px; border-radius: 24px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 1rem; outline: none; }
-  .btn-circle { width: 46px; height: 46px; border-radius: 50%; border: none; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+  .btn-circle { width: 44px; height: 44px; border-radius: 50%; border: none; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
   #mic-btn { background: #0284c7; color: white; }
   #mic-btn.listening { background: #ef4444; animation: pulse 1.2s infinite; }
   #send-btn { background: #10b981; color: white; }
@@ -206,11 +205,11 @@ APP_HTML = """
   </header>
   <div id="mem-panel"></div>
   <div id="chat">
-    <div class="msg bot">Hey! I'm Shrushti. What's up? Feel free to type or talk in any language.</div>
+    <div class="msg bot">Hey! I'm Shrushti. What's up? Type or tap the mic to talk in any language!</div>
   </div>
   <footer>
-    <button class="btn-circle" id="mic-btn" onclick="toggleMic()" title="Talk to Didi">🎤</button>
-    <input id="inp" type="text" placeholder="Type or talk to Didi..." onkeypress="if(event.key==='Enter')sendMsg()">
+    <button class="btn-circle" id="mic-btn" onclick="toggleMic()" title="Talk">🎤</button>
+    <input id="inp" type="text" placeholder="Type or talk..." onkeypress="if(event.key==='Enter')sendMsg()">
     <button class="btn-circle" id="send-btn" onclick="sendMsg()" title="Send">➤</button>
   </footer>
 
@@ -238,7 +237,6 @@ async function sendMsg() {
   appendMsg(text, 'user');
   inp.value = '';
   
-  // Typing indicator placeholder
   const loadingId = 'load_' + Date.now();
   const loadDiv = document.createElement('div');
   loadDiv.id = loadingId;
@@ -286,7 +284,7 @@ if (SpeechRecognition) {
 
 function toggleMic() {
   if (!rec) { 
-    alert("Voice input works inside Google Chrome on your phone. Make sure mic permission is allowed!"); 
+    alert("Voice input requires Google Chrome on Android."); 
     return; 
   }
   try {
@@ -357,6 +355,6 @@ def api_del_memory(idx):
     return jsonify({"status": "deleted"})
 
 if __name__ == "__main__":
-    port = int(os.environ.g("PORT", 10000)) if False else int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
     
