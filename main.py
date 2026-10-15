@@ -2,7 +2,7 @@ import os, glob, json, importlib.util, requests, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 app = Flask(__name__)
 
@@ -15,8 +15,8 @@ ASSISTANT_CONFIG = {
 
 MODEL_LADDER = [
     "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash"
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
 ]
 
 MEMORIES = []
@@ -100,6 +100,9 @@ for path in glob.glob("plugins/*.py"):
         HANDLERS[mod.TOOL["name"]] = mod.handler
 
 def ask_gemini(history):
+    if not GEMINI_KEY:
+        return {"error": "API Key missing! Please set GEMINI_API_KEY in Render environment variables."}
+
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
     names_str = " / ".join(ASSISTANT_CONFIG["names"])
     sys_prompt = (
@@ -108,21 +111,27 @@ def ask_gemini(history):
         f"Always maintain clarity that you are an AI assistant.\n"
         f"MULTILINGUAL RULE: Reply in the exact language and script the user uses. "
         f"Current language setting: {ASSISTANT_CONFIG['preferred_language']}.\n"
-        f"Active skills: {list(HANDLERS.keys())}.\n"
         f"Known facts:\n{mem_text}"
     )
+    
+    # Clean standard v1beta payload structure
     payload = {
-        "system_instruction": {"parts": [{"text": sys_prompt}]},
         "contents": history,
+        "system_instruction": {"parts": [{"text": sys_prompt}]},
         "tools": [{"function_declarations": TOOLS}]
     }
+
     for model in MODEL_LADDER:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
         try:
-            r = requests.post(url, json=payload, timeout=35)
+            r = requests.post(url, json=payload, timeout=30)
+            print(f"Model {model} status: {r.status_code}")
             if r.status_code == 200:
                 return r.json()
-        except Exception:
+            else:
+                print(f"Error response: {r.text}")
+        except Exception as e:
+            print(f"Exception with model {model}: {str(e)}")
             continue
     return None
 
@@ -133,8 +142,12 @@ def run_conversation_turn(session_id, user_text):
         history[:] = history[-20:]
 
     resp = ask_gemini(history)
-    if not resp or "candidates" not in resp:
-        return "Arre, network issue aa gaya! Try saying that again."
+    if not resp:
+        return "Arre! Check if your GEMINI_API_KEY is correctly added in Render settings."
+    if "error" in resp:
+        return resp["error"]
+    if "candidates" not in resp:
+        return "Acha, API limit hit ho gayi ya busy hai. Ek baar aur try karo!"
 
     part = resp["candidates"][0]["content"]["parts"][0]
 
