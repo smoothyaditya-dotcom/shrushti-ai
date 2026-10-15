@@ -2,7 +2,8 @@ import os, glob, json, importlib.util, requests, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
-GEMINI_KEY = "AQ.Ab8RN6JLHPCpiPEU-NVsWjj0-IBhZlna6YLyGutb96R-CJGoMg"
+# Yahan hum check karenge ki Render ne key uthayi ya nahi
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 app = Flask(__name__)
 
@@ -101,12 +102,11 @@ for path in glob.glob("plugins/*.py"):
 
 def ask_gemini(history):
     if not GEMINI_KEY:
-        return {"error": "Arey! Render par GEMINI_API_KEY set karna bhool gaye ho kya? Environment variables mein jaake key daalo!"}
+        return {"error": "Arey Chhote! Render environment variables mein GEMINI_API_KEY missing hai ya blank hai. Wahan jaake check karo!"}
 
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
     names_str = " / ".join(ASSISTANT_CONFIG["names"])
     
-    # Ekdum natural, loving, casual big sister (Didi) prompt
     sys_prompt = (
         f"Your name is {names_str}. You are a very close, loving, and casual big sister (Didi) to the user. "
         f"Talk in a super natural, conversational, and everyday tone—just like chatting on WhatsApp or talking face-to-face. "
@@ -129,7 +129,10 @@ def ask_gemini(history):
             r = requests.post(url, json=payload, timeout=30)
             if r.status_code == 200:
                 return r.json()
-        except Exception:
+            else:
+                print(f"API Error ({model}): {r.text}")
+        except Exception as e:
+            print(f"Exception ({model}): {str(e)}")
             continue
     return None
 
@@ -141,11 +144,11 @@ def run_conversation_turn(session_id, user_text):
 
     resp = ask_gemini(history)
     if not resp:
-        return "Arey Chhote, network connection check karo ya GEMINI_API_KEY verify karo!"
+        return "Arey Chhote, API key ya network mein kuch gadbad hai. Render logs check karo!"
     if "error" in resp:
         return resp["error"]
     if "candidates" not in resp:
-        return "Acha, abhi thoda traffic zyada hai, ek baar aur message bhejo na!"
+        return "Acha, server thoda busy hai, ek baar fir se message bhejo na!"
 
     part = resp["candidates"][0]["content"]["parts"][0]
 
