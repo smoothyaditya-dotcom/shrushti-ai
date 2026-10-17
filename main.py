@@ -10,7 +10,7 @@ import glob, json, importlib.util, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
-# Apni Groq API key yahan daal do (gsk_ se shuru hoti hai)
+# Sahi format wali Groq key (lowercase gsk_)
 GROQ_KEY = "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"
 
 app = Flask(__name__)
@@ -22,8 +22,13 @@ ASSISTANT_CONFIG = {
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
-# 100% Working Groq Model ID
-MODEL_NAME = "llama-3.1-8b-instant"
+# Active working models list on Groq
+MODEL_CANDIDATES = [
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "llama3-70b-8192",
+    "mixtral-8x7b-32768"
+]
 
 MEMORIES = []
 ACTION_LOG = []
@@ -69,7 +74,7 @@ TOOLS = [
     {
         "name": "recall_memory",
         "description": "Search saved memories on demand.",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": {"query"}}
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
     },
     {
         "name": "undo_last_action",
@@ -106,9 +111,6 @@ for path in glob.glob("plugins/*.py"):
         HANDLERS[mod.TOOL["name"]] = mod.handler
 
 def ask_groq(history):
-    if not GROQ_KEY or "gsk_Yahan" in GROQ_KEY:
-        return "Arey Chhote! Code mein apni asli Groq API key (gsk_...) dalna bhool gaye ho!"
-
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
     names_str = " / ".join(ASSISTANT_CONFIG["names"])
     
@@ -123,27 +125,31 @@ def ask_groq(history):
     )
 
     messages = [{"role": "system", "content": sys_prompt}] + history
-
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "model": MODEL_NAME,
-        "messages": messages,
-        "temperature": 0.7
-    }
 
-    try:
-        r = requests.post(url, json=payload, headers=headers, timeout=30)
-        if r.status_code == 200:
-            res_json = r.json()
-            return res_json["choices"][0]["message"]["content"]
-        else:
-            return f"Groq API Error ({r.status_code}): {r.text}"
-    except Exception as e:
-        return f"Exception: {str(e)}"
+    last_error = ""
+    for model_id in MODEL_CANDIDATES:
+        payload = {
+            "model": model_id,
+            "messages": messages,
+            "temperature": 0.7
+        }
+        try:
+            r = requests.post(url, json=payload, headers=headers, timeout=25)
+            if r.status_code == 200:
+                res_json = r.json()
+                return res_json["choices"][0]["message"]["content"]
+            else:
+                last_error = f"{model_id}: {r.status_code} - {r.text}"
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    return f"Groq Error: {last_error}"
 
 def run_conversation_turn(session_id, user_text):
     history = CHAT_HISTORY.setdefault(session_id, [])
@@ -163,13 +169,12 @@ APP_HTML = """
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#090d16">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="/manifest.json">
 <title>Shrushti AI - Your Big Sister</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body { background: #090d16; color: #f1f5f9; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
-  header { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.15); flex-shrink: 0; z-index: 10; }
+  header { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(56, 189, 248, 0.15); flex-shrink: 0; }
   .brand { display: flex; align-items: center; gap: 10px; }
   .avatar-glow { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #38bdf8, #818cf8); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; box-shadow: 0 0 12px rgba(56, 189, 248, 0.4); }
   header h1 { font-size: 1.05rem; font-weight: 600; color: #f8fafc; }
@@ -182,8 +187,7 @@ APP_HTML = """
   .msg { max-width: 82%; padding: 12px 16px; border-radius: 18px; line-height: 1.5; font-size: 0.94rem; word-wrap: break-word; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
   .user { background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
   .bot { background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(255, 255, 255, 0.06); color: #f1f5f9; align-self: flex-start; border-bottom-left-radius: 4px; }
-  #mem-panel { display: none; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(16px); padding: 16px; border-bottom: 1px solid rgba(56, 189, 248, 0.2); max-height: 45vh; overflow-y: auto; flex-shrink: 0; z-index: 5; }
-  #mem-panel h3 { font-size: 0.95rem; color: #38bdf8; margin-bottom: 8px; }
+  #mem-panel { display: none; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(16px); padding: 16px; border-bottom: 1px solid rgba(56, 189, 248, 0.2); max-height: 45vh; overflow-y: auto; flex-shrink: 0; }
   .mem-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.88rem; color: #cbd5e1; }
   .mem-item button { background: rgba(239, 68, 68,.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 3px 10px; border-radius: 6px; font-size: 0.78rem; cursor: pointer; }
   footer { background: rgba(15, 23, 42, 0.9); padding: 12px; display: flex; gap: 8px; align-items: center; border-top: 1px solid rgba(255, 255, 255, 0.06); flex-shrink: 0; }
