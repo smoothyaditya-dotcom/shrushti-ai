@@ -10,7 +10,7 @@ import glob, json, importlib.util, io
 from flask import Flask, request, jsonify, render_template_string, Response
 from pypdf import PdfReader
 
-# Sahi format wali Groq key (lowercase gsk_)
+# Aapki verified working Groq key
 GROQ_KEY = "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"
 
 app = Flask(__name__)
@@ -22,93 +22,32 @@ ASSISTANT_CONFIG = {
     "preferred_language": "Auto-detect (match the user's exact language and script)"
 }
 
-# Active working models list on Groq
-MODEL_CANDIDATES = [
-    "llama-3.1-8b-instant",
-    "llama3-8b-8192",
-    "llama3-70b-8192",
-    "mixtral-8x7b-32768"
-]
-
 MEMORIES = []
 ACTION_LOG = []
 CHAT_HISTORY = {}
 
-def save_memory(args):
-    fact = args.get("fact", "")
-    MEMORIES.append(fact)
-    ACTION_LOG.append({"action": "save_memory", "fact": fact})
-    return {"status": "Saved to memory", "fact": fact}
-
-def recall_memory(args):
-    query = args.get("query", "").lower()
-    matches = [m for m in MEMORIES if query in m.lower()]
-    return {"matches": matches if matches else MEMORIES}
-
-def undo_last_action(args):
-    if not ACTION_LOG:
-        return {"status": "Nothing to undo."}
-    last = ACTION_LOG.pop()
-    if last["action"] == "save_memory" and last["fact"] in MEMORIES:
-        MEMORIES.remove(last["fact"])
-        return {"status": f"Undid memory: {last['fact']}"}
-    return {"status": "Undone"}
-
-def customize_assistant(args):
-    prev = dict(ASSISTANT_CONFIG)
-    if "user_name" in args:
-        ASSISTANT_CONFIG["user_name"] = args["user_name"]
-    if "tone" in args:
-        ASSISTANT_CONFIG["tone"] = args["tone"]
-    if "preferred_language" in args:
-        ASSISTANT_CONFIG["preferred_language"] = args["preferred_language"]
-    ACTION_LOG.append({"action": "customize", "previous": prev})
-    return {"status": "Updated immediately", "current_config": ASSISTANT_CONFIG}
-
-TOOLS = [
-    {
-        "name": "save_memory",
-        "description": "Save an important fact, preference, or goal about the user.",
-        "parameters": {"type": "object", "properties": {"fact": {"type": "string"}}, "required": ["fact"]}
-    },
-    {
-        "name": "recall_memory",
-        "description": "Search saved memories on demand.",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
-    },
-    {
-        "name": "undo_last_action",
-        "description": "Undo the last memory saved or setting changed.",
-        "parameters": {"type": "object", "properties": {}}
-    },
-    {
-        "name": "customize_assistant",
-        "description": "Update user name, tone, or preferred language.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "user_name": {"type": "string"},
-                "tone": {"type": "string"},
-                "preferred_language": {"type": "string"}
-            }
-        }
-    }
-]
-
-HANDLERS = {
-    "save_memory": save_memory,
-    "recall_memory": recall_memory,
-    "undo_last_action": undo_last_action,
-    "customize_assistant": customize_assistant
-}
-
-for path in glob.glob("plugins/*.py"):
-    spec = importlib.util.spec_from_file_location("plugin", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    if hasattr(mod, "TOOL") and hasattr(mod, "handler"):
-        TOOLS.append(mod.TOOL)
-        HANDLERS[mod.TOOL["name"]] = mod.handler
+def get_active_groq_models():
+    """Groq API se live active models fetch karta hai taaki decommission error na aaye"""
+    url = "https://api.groq.com/openai/v1/models"
+    headers = {"Authorization": f"Bearer {GROQ_KEY}"}
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            # Whisper/audio models filter out karke chat models prioritize karein
+            all_ids = [m["id"] for m in data.get("data", []) if "whisper" not in m["id"].lower()]
+            preferred = ["llama", "gemma", "mixtral", "qwen"]
+            sorted_models = []
+            for pref in preferred:
+                sorted_models.extend([mid for mid in all_ids if pref in mid.lower() and mid not in sorted_models])
+            for mid in all_ids:
+                if mid not in sorted_models:
+                    sorted_models.append(mid)
+            if sorted_models:
+                return sorted_models
+    except Exception:
+        pass
+    return ["llama3-8b-8192", "gemma2-9b-it", "llama-3.1-8b-instant"]
 
 def ask_groq(history):
     mem_text = "\n".join([f"- {m}" for m in MEMORIES]) or "No saved memories yet."
@@ -131,8 +70,10 @@ def ask_groq(history):
         "Content-Type": "application/json"
     }
 
+    models_to_try = get_active_groq_models()
     last_error = ""
-    for model_id in MODEL_CANDIDATES:
+
+    for model_id in models_to_try:
         payload = {
             "model": model_id,
             "messages": messages,
